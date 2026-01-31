@@ -1,4 +1,3 @@
-# config.py
 import os
 
 FEISHU_HOST = "https://open.feishu.cn"
