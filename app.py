@@ -64,7 +64,7 @@ def todo_push_link():
     if not url:
         return jsonify({"ok": False, "error": "missing url"}), 400
 
-    token = get_user_token(user_key=user_key)
+    token = get_user_token(APP_ID, APP_SECRET, user_key=user_key)
     if not token:
         return jsonify({"ok": False, "error": "no user token, open /oauth/start first"}), 400
 

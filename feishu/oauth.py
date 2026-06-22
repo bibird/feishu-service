@@ -8,6 +8,7 @@ from config import FEISHU_HOST, DATA_DIR
 from urllib.parse import urlencode
 
 TOKENS_FILE = os.path.join(DATA_DIR, "tokens.json")
+USER_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
 
 def _load_tokens() -> Dict:
@@ -73,6 +74,31 @@ def exchange_code_for_user_token(app_id: str, app_secret: str, code: str) -> Dic
     return data.get("data", {})
 
 
+def refresh_user_token(app_id: str, app_secret: str, refresh_token: str) -> Dict:
+    """
+    刷新用户凭证-一个星期.
+    """
+    url = f"{FEISHU_HOST}/open-apis/authen/v1/refresh_access_token"
+    resp = requests.post(
+        url,
+        json={
+            "app_id": app_id,
+            "app_secret": app_secret,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    print("[oauth] refresh_token resp code/msg =", data.get("code"), data.get("msg"), flush=True)
+
+    if data.get("code") != 0:
+        raise RuntimeError(data)
+    return data.get("data", {})
+
+
 def save_user_token(state: str, token_data: Dict) -> Dict:
     """
     把 user_access_token 落盘到 data/tokens.json
@@ -83,17 +109,59 @@ def save_user_token(state: str, token_data: Dict) -> Dict:
         raise RuntimeError({"error": "invalid_state", "state": state})
 
     user_key = st.get("user_key", "me")
-    store["users"][user_key] = {
-        "saved_at": int(time.time()),
-        **token_data,
-    }
+    now = int(time.time())
+    store["users"][user_key] = _with_expire_at(token_data, now)
     _save_tokens(store)
     return store["users"][user_key]
 
 
-def get_user_token(user_key: str = "me") -> Optional[str]:
+def _with_expire_at(token_data: Dict, now: Optional[int] = None) -> Dict:
+    now = now or int(time.time())
+    expires_in = int(token_data.get("expires_in") or 0)
+    refresh_expires_in = int(token_data.get("refresh_expires_in") or 0)
+
+    data = {
+        **token_data,
+        "saved_at": now,
+    }
+    data["authorized_at"] = int(data.get("authorized_at") or now)
+    data["auth_expire_at"] = data["authorized_at"] + USER_TOKEN_MAX_AGE_SECONDS
+    if expires_in:
+        data["expire_at"] = now + expires_in
+    if refresh_expires_in:
+        data["refresh_expire_at"] = now + refresh_expires_in
+    return data
+
+
+def get_user_token(app_id: str, app_secret: str, user_key: str = "me") -> Optional[str]:
     store = _load_tokens()
     u = store.get("users", {}).get(user_key)
     if not u:
         return None
-    return u.get("access_token")
+
+    now = int(time.time())
+    authorized_at = int(u.get("authorized_at") or u.get("saved_at") or 0)
+    if authorized_at and now >= authorized_at + USER_TOKEN_MAX_AGE_SECONDS:
+        return None
+
+    expire_at = int(u.get("expire_at") or 0)
+    if not expire_at and u.get("saved_at") and u.get("expires_in"):
+        expire_at = int(u["saved_at"]) + int(u["expires_in"])
+
+    if expire_at and now < expire_at - 300:
+        return u.get("access_token")
+
+    refresh_token = u.get("refresh_token")
+    refresh_expire_at = int(u.get("refresh_expire_at") or 0)
+    if not refresh_expire_at and u.get("saved_at") and u.get("refresh_expires_in"):
+        refresh_expire_at = int(u["saved_at"]) + int(u["refresh_expires_in"])
+
+    if not refresh_token:
+        return None
+    if refresh_expire_at and now >= refresh_expire_at - 300:
+        return None
+
+    token_data = refresh_user_token(app_id, app_secret, refresh_token)
+    store["users"][user_key] = _with_expire_at({**u, **token_data}, now)
+    _save_tokens(store)
+    return store["users"][user_key].get("access_token")
