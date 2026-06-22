@@ -1,6 +1,6 @@
 # feishu/departments.py
 from typing import List, Dict
-from feishu.http import feishu_get
+from feishu.feishu_http import feishu_get
 from config import MAX_PAGE_SIZE
 
 

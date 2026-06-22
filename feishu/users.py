@@ -3,7 +3,7 @@
 import json
 import os
 from typing import List, Dict, Optional
-from feishu.http import feishu_get
+from feishu.feishu_http import feishu_get
 from config import USER_MAP_FILE
 
 

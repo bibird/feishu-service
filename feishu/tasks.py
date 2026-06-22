@@ -14,12 +14,11 @@ def create_task_with_link(user_access_token: str, title: str, url: str) -> Dict[
         "summary": title,
         "description": f"报表链接：{url}",
     }
-
     resp = requests.post(api, headers=headers, json=payload, timeout=20)
     # 不直接 raise，检查错误体
     try:
         data = resp.json()
     except Exception:
         data = {"http_status": resp.status_code, "text": resp.text}
-
+    # print("[task] resp =", data, flush=True)  代办结果返回
     return {"http_status": resp.status_code, "data": data}
